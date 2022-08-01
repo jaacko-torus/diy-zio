@@ -1,6 +1,7 @@
 package jaackotorus
 package diy_zio
 
+//import _root_.zio.*
 import zio.*
 
 object Main extends App:
@@ -12,5 +13,3 @@ object Main extends App:
       name <- ZIO.succeed("Julian") // console.getStrLn
       _    <- console.putStrLn(s"Hello $name")
     yield ()
-
-//  def run(args: List[String]) = program.exitCode
