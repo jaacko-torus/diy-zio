@@ -6,6 +6,15 @@ The format is based on [Keep a Changelog],
 and this project adheres to [Semantic Versioning].
 
 
+## [0.5.0] - 2022-08-02
+
+### Added
+- `ZIO.identity`
+- `ZIO.environment`
+- `ZIO.access`
+- `ZIO.accessM`
+
+
 ## [0.4.0] - 2022-08-02
 
 ### Added
@@ -17,6 +26,7 @@ and this project adheres to [Semantic Versioning].
 
 ### Removed
 - `ZIO.Thunk`
+
 
 ## [0.3.0] - 2022-08-01
 
@@ -46,7 +56,8 @@ and this project adheres to [Semantic Versioning].
 [Semantic Versioning]: https://semver.org/spec/v2.0.0.html
 
 <!-- Versions -->
-[unreleased]: https://github.com/jaacko-torus/diy-zio/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/jaacko-torus/diy-zio/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/jaacko-torus/diy-zio/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/jaacko-torus/diy-zio/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/jaacko-torus/diy-zio/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/jaacko-torus/diy-zio/compare/v0.1.0...v0.2.0

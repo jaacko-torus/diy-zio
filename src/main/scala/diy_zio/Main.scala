@@ -14,21 +14,27 @@ import zio.*
 //      _    <- console.putStrLn(s"Hello $name")
 //    yield ()
 
-trait BusinessLogic:
-  def evenPicturesOf(topic: String): Boolean
+object businessLogic:
+  trait BusinessLogic:
+    def evenPicturesOf(topic: String): ZIO[Any, Nothing, Boolean]
 
-object BusinessLogic:
-  lazy val live: ZIO[Google, Nothing, BusinessLogic] =
-    ZIO.fromFunction(make)
-  def make(google: Google): BusinessLogic =
-    topic => google.countPicturesOf(topic) % 2 == 0
+  object BusinessLogic:
+    lazy val live: ZIO[Google, Nothing, BusinessLogic] =
+      ZIO.fromFunction(make)
+    def make(google: Google): BusinessLogic =
+      topic => google.countPicturesOf(topic).map(_ % 2 == 0)
+
+  def evenPicturesOf(topic: String): ZIO[BusinessLogic, Nothing, Boolean] =
+    ZIO.accessM(_.evenPicturesOf(topic))
+
+import businessLogic.BusinessLogic
 
 trait Google:
-  def countPicturesOf(topic: String): Int
+  def countPicturesOf(topic: String): ZIO[Any, Nothing, Int]
 
 object GoogleImpl:
   lazy val live: ZIO[Any, Nothing, Google] = ZIO.succeed(make)
-  lazy val make: Google                    = topic => if topic == "cats" then 27193 else 183208
+  lazy val make: Google = topic => ZIO.succeed(if topic == "cats" then 27193 else 183208)
 
 object DependencyGraph:
   lazy val live: ZIO[Any, Nothing, BusinessLogic] =
@@ -43,11 +49,12 @@ object DependencyGraph:
     businessLogic
 
 object Main extends App:
-  Runtime.default.unsafeRunSync(program)
+  Runtime.default.unsafeRunSync(program.provide(DependencyGraph.make))
 
   lazy val program =
     for
-      businessLogic <- DependencyGraph.live
-      _             <- console.putStrLn(businessLogic.evenPicturesOf("cats").toString)
-      _             <- console.putStrLn(businessLogic.evenPicturesOf("dogs").toString)
+      cats <- businessLogic.evenPicturesOf("cats")
+      _    <- console.putStrLn(cats.toString)
+      dogs <- businessLogic.evenPicturesOf("dogs")
+      _    <- console.putStrLn(dogs.toString)
     yield ()
