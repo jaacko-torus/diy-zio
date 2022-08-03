@@ -9,6 +9,12 @@ object zio:
     def flatMap[R1 <: R, E1 >: E, B](a2zb: A => ZIO[R1, E1, B]): ZIO[R1, E1, B] =
       ZIO { r => run(r).fold(ZIO.fail, a2zb).run(r) }
 
+    def zip[R1 <: R, E1 >: E, B](that: ZIO[R1, E1, B]): ZIO[R1, E1, (A, B)] =
+      for
+        a <- this
+        b <- that
+      yield a -> b
+
     def map[B](a2b: A => B): ZIO[R, E, B] =
       ZIO { r => run(r).map(a2b) }
 
@@ -35,6 +41,9 @@ object zio:
         Has[ZEnv] & R1 => R,
     ): ZIO[Has[ZEnv], E, A] =
       provideSome[Has[ZEnv]](_.`union`(r1).asInstanceOf[R])
+
+    def provideLayer[R1, E1 >: E](layer: ZLayer[R1, E1, R]): ZIO[R1, E1, A] =
+      layer.zio.flatMap((r => provide(r)))
 
   object ZIO:
     def succeed[A](a: => A): ZIO[Any, Nothing, A] =
@@ -75,8 +84,8 @@ object zio:
         def putStrLn(line: => String): ZIO[Any, Nothing, Unit]
         def getStrLn(): ZIO[Any, Nothing, Unit]
 
-      lazy val live: ZIO[Any, Nothing, Service] =
-        ZIO.succeed(make)
+      lazy val live: ZLayer[Any, Nothing, Console] =
+        ZLayer.succeed(make)
 
       lazy val make: Service = new:
         def putStrLn(line: => String) =
@@ -93,9 +102,12 @@ object zio:
   object Runtime:
     object default:
       def unsafeRunSync[E, A](zio: => ZIO[ZEnv, E, A]): Either[E, A] =
-        zio.run(Has(console.Console.make))
+        zio.provideLayer((ZEnv.live)).run(())
 
-  type ZEnv = Has[console.Console.Service]
+  type ZEnv = console.Console
+  object ZEnv:
+    lazy val live: ZLayer[Any, Nothing, ZEnv] =
+      console.Console.live
 
   final class Has[A] private (private val map: Map[String, Any])
 
@@ -110,3 +122,31 @@ object zio:
 
       def get[S](using view: A => Has[S])(using tag: ClassTag[S]): S =
         a.map(tag.toString).asInstanceOf[S]
+
+  final class ZLayer[-R, +E, +A](val zio: ZIO[R, E, A]):
+    inline def flatMap[R1 <: R, E1 >: E, B](a2zb: A => ZLayer[R1, E1, B]): ZLayer[R1, E1, B] =
+      ZLayer(this.zio.flatMap(a => a2zb(a).zio))
+
+    inline def zip[R1 <: R, E1 >: E, B](that: ZLayer[R1, E1, B]): ZLayer[R1, E1, (A, B)] =
+      ZLayer(this.zio.zip(that.zio))
+
+    inline def map[B](a2b: A => B): ZLayer[R, E, B] =
+      ZLayer(this.zio.map(a2b))
+
+    inline def provide(r: => R): ZLayer[Any, E, A] =
+      ZLayer(this.zio.provide(r))
+
+    inline def provideSome[R1](f: R1 => R): ZLayer[R1, E, A] =
+      ZLayer(this.zio.provideSome(f))
+
+  object ZLayer:
+    def succeed[A: ClassTag](a: => A): ZLayer[Any, Nothing, Has[A]] =
+      ZLayer(ZIO.succeed(Has(a)))
+
+    def fromService[R <: Has[S], S: ClassTag, A: ClassTag](f: S => A): ZLayer[R, Nothing, Has[A]] =
+      ZLayer(ZIO.fromFunction { r => Has(f(r.get[S])) })
+
+    def fromServices[R <: Has[S1] & Has[S2], S1: ClassTag, S2: ClassTag, A: ClassTag](
+        f: (S1, S2) => A,
+    ): ZLayer[R, Nothing, Has[A]] =
+      ZLayer(ZIO.fromFunction { r => Has(f(r.get[S1], r.get[S2])) })
