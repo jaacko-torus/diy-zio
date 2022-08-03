@@ -5,7 +5,7 @@ ThisBuild / organization := "jaackotorus"
 ThisBuild / scalacOptions ++=
   Seq(
     "-deprecation",
-    "-explain",
+//    "-explain",
     "-feature",
     "-language:implicitConversions",
     "-unchecked",
