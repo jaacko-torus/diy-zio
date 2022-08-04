@@ -1,5 +1,8 @@
 package jaackotorus
 package diy_zio.diy
+
+import java.io.IOException
+
 import scala.annotation.targetName
 import scala.reflect.ClassTag
 import scala.util.Try
@@ -30,20 +33,19 @@ object zio:
     def provideSome[R1](f: R1 => R): ZIO[R1, E, A] =
       ZIO.accessM(r1 => provide(f(r1)))
 
-    // CUSTOM
-    def provideCustom[R1: ClassTag](r1: => R1)(using
-        Has[ZEnv] & Has[R1] => R,
-    ): ZIO[Has[ZEnv], E, A] =
-      provideCustomLayer(Has(r1))
+    def provideSomeLayer[R1 <: Has[?], E1 >: E, B <: Has[?]](layer: ZLayer[R1, E1, B])(using
+        B => R,
+    ): ZIO[R1, E1, A] =
+      provideLayer(ZLayer.identity[R1] ++ layer)
 
     // CUSTOM
-    def provideCustomLayer[R1 <: Has[?]](r1: => R1)(using
-        Has[ZEnv] & R1 => R,
-    ): ZIO[Has[ZEnv], E, A] =
-      provideSome[Has[ZEnv]](_.`union`(r1).asInstanceOf[R])
+    def provideCustomLayer[E1 >: E, B <: Has[?]](layer: ZLayer[ZEnv, E1, B])(using
+        B => R,
+    ): ZIO[ZEnv, E1, A] =
+      provideSomeLayer(layer)
 
-    def provideLayer[R1, E1 >: E](layer: ZLayer[R1, E1, R]): ZIO[R1, E1, A] =
-      layer.zio.flatMap((r => provide(r)))
+    def provideLayer[R1, E1 >: E, B](layer: ZLayer[R1, E1, B])(using view: B => R): ZIO[R1, E1, A] =
+      layer.zio.map(view).flatMap((r => provide(r)))
 
   object ZIO:
     def succeed[A](a: => A): ZIO[Any, Nothing, A] =
@@ -81,22 +83,25 @@ object zio:
 
     object Console:
       trait Service:
-        def putStrLn(line: => String): ZIO[Any, Nothing, Unit]
-        def getStrLn(): ZIO[Any, Nothing, Unit]
+        def putStrLn(line: String): ZIO[Any, IOException, Unit]
+        def getStrLn(): ZIO[Any, IOException, Unit]
+
+      lazy val any: ZLayer[Console, Nothing, Console] =
+        ZLayer.requires
 
       lazy val live: ZLayer[Any, Nothing, Console] =
         ZLayer.succeed(make)
 
       lazy val make: Service = new:
-        def putStrLn(line: => String) =
+        override def putStrLn(line: String): ZIO[Any, IOException, Unit] =
           ZIO.succeed(println(line))
-        def getStrLn() =
+        override def getStrLn(): ZIO[Any, IOException, Unit] =
           ZIO.succeed(scala.io.StdIn.readLine())
 
-    def putStrLn(line: => String): ZIO[Console, Nothing, Unit] =
+    def putStrLn(line: => String): ZIO[Console, IOException, Unit] =
       ZIO.accessM(_.get.putStrLn(line))
 
-    def getStrLn(): ZIO[Console, Nothing, Unit] =
+    def getStrLn(): ZIO[Console, IOException, Unit] =
       ZIO.accessM(_.get.getStrLn())
 
   object Runtime:
@@ -106,6 +111,8 @@ object zio:
 
   type ZEnv = console.Console
   object ZEnv:
+    lazy val any: ZLayer[ZEnv, Nothing, ZEnv] =
+      ZLayer.requires
     lazy val live: ZLayer[Any, Nothing, ZEnv] =
       console.Console.live
 
@@ -139,6 +146,14 @@ object zio:
     inline def provideSome[R1](f: R1 => R): ZLayer[R1, E, A] =
       ZLayer(this.zio.provideSome(f))
 
+    def >>>[E1 >: E, B <: Has[?]](that: ZLayer[A, E1, B])(using A => Has[?]): ZLayer[R, E1, B] =
+      this.flatMap(a => that.provide(a))
+
+    def ++[R1 <: Has[?], E1 >: E, B <: Has[?]](that: ZLayer[R1, E1, B])(using
+        view: A => Has[?],
+    ): ZLayer[R & R1, E1, A & B] =
+      this.zip(that).map((a, b) => (view(a) `union` b).asInstanceOf[A & B])
+
   object ZLayer:
     def succeed[A: ClassTag](a: => A): ZLayer[Any, Nothing, Has[A]] =
       ZLayer(ZIO.succeed(Has(a)))
@@ -150,3 +165,9 @@ object zio:
         f: (S1, S2) => A,
     ): ZLayer[R, Nothing, Has[A]] =
       ZLayer(ZIO.fromFunction { r => Has(f(r.get[S1], r.get[S2])) })
+
+    inline def requires[R]: ZLayer[R, Nothing, R] =
+      identity[R]
+
+    def identity[R]: ZLayer[R, Nothing, R] =
+      ZLayer(ZIO.identity)

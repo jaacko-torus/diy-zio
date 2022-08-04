@@ -1,8 +1,10 @@
 package jaackotorus
 package diy_zio
 
-//import zio.*
+// import zio.*
 import diy.zio.*
+
+import java.io.IOException
 
 object businessLogic:
   type BusinessLogic = Has[BusinessLogic.Service]
@@ -11,8 +13,12 @@ object businessLogic:
     trait Service:
       def evenPicturesOf(topic: String): ZIO[Any, Nothing, Boolean]
 
+    lazy val any: ZLayer[BusinessLogic, Nothing, BusinessLogic] =
+      ZLayer.requires
+
     lazy val live: ZLayer[google.Google, Nothing, BusinessLogic] =
       ZLayer.fromService(make)
+
     def make(_google: google.Google.Service): Service =
       topic => _google.countPicturesOf(topic).map(_ % 2 == 0)
 
@@ -24,6 +30,7 @@ object google:
   object Google:
     trait Service:
       def countPicturesOf(topic: String): ZIO[Any, Nothing, Int]
+    lazy val any: ZLayer[Google, Nothing, Google] = ZLayer.requires
   def countPicturesOf(topic: String): ZIO[Google, Nothing, Int] =
     ZIO.accessM(_.get.countPicturesOf(topic))
 
@@ -35,14 +42,17 @@ object controller:
   type Controller = Has[Controller.Service]
   object Controller:
     trait Service:
-      def run: ZIO[Any, Nothing, Unit]
+      def run: ZIO[Any, IOException, Unit]
+
+    lazy val any: ZLayer[Controller, Nothing, Controller] =
+      ZLayer.requires
 
     lazy val live: ZLayer[businessLogic.BusinessLogic & console.Console, Nothing, Controller] =
       ZLayer.fromServices(make)
 
     def make(bl: businessLogic.BusinessLogic.Service, c: console.Console.Service): Service =
       new:
-        lazy val run: ZIO[Any, Nothing, Unit] =
+        override lazy val run: ZIO[Any, IOException, Unit] =
           for
             cats <- bl.evenPicturesOf("cats")
             _    <- c.putStrLn(cats.toString)
@@ -50,29 +60,45 @@ object controller:
             _    <- c.putStrLn(dogs.toString)
           yield ()
 
-  lazy val run: ZIO[Controller, Nothing, Unit] =
+  lazy val run: ZIO[Controller, IOException, Unit] =
     ZIO.accessM(_.get.run)
 
 object DependencyGraph:
-  lazy val live: ZLayer[Any, Nothing, controller.Controller] =
-    for
-      (googleMaker, consoleMaker) <- GoogleImpl.live.zip(console.Console.live)
-      businessLogicMaker          <- businessLogic.BusinessLogic.live.provide(googleMaker)
-      controllerMaker <- controller.Controller.live.provide(
-        businessLogicMaker `union` consoleMaker,
-      )
-    yield controllerMaker
+  lazy val env: ZLayer[Any, Nothing, controller.Controller] =
+    (GoogleImpl.live >>> businessLogic.BusinessLogic.live ++ console.Console.live) >>>
+      controller.Controller.live
 
-  lazy val make: controller.Controller.Service =
-    val (_google, _console) = (GoogleImpl.make, console.Console.make)
-    val _businessLogic      = businessLogic.BusinessLogic.make(_google)
-    val _controller         = controller.Controller.make(_businessLogic, _console)
-    _controller
+  lazy val partial: ZLayer[console.Console, Nothing, controller.Controller] =
+    ((GoogleImpl.live >>> businessLogic.BusinessLogic.live) ++ console.Console.any) >>>
+      controller.Controller.live
 
 object Main extends scala.App:
   Runtime.default.unsafeRunSync(program)
 
+  object FancyConsole:
+    lazy val any: ZLayer[console.Console, Nothing, console.Console] =
+      ZLayer.requires
+
+    lazy val live: ZLayer[Any, Nothing, console.Console] =
+      ZLayer.succeed(make)
+
+    lazy val make: console.Console.Service = new:
+      override def putStrLn(line: String): ZIO[Any, Nothing, Unit] =
+        ZIO.succeed(scala.Console.println(scala.Console.GREEN + line + scala.Console.RESET))
+      override def getStrLn(): ZIO[Any, Nothing, Unit] =
+        ZIO.succeed(scala.io.StdIn.readLine())
+      // For compat with the real ZIO
+      def putStr(line: String): ZIO[Any, Nothing, Unit] =
+        ZIO.succeed(scala.Console.print(scala.Console.GREEN + line + scala.Console.RESET))
+      def putStrLnErr(line: String): ZIO[Any, Nothing, Unit] =
+        ZIO.succeed(scala.Console.err.println(scala.Console.RED + line + scala.Console.RESET))
+      def putStrErr(line: String): ZIO[Any, Nothing, Unit] =
+        ZIO.succeed(scala.Console.err.print(scala.Console.RED + line + scala.Console.RESET))
+
   lazy val program =
     // DependencyGraph.live.zio.flatMap(_.get.run)
     // DependencyGraph.live.zio.flatMap(r => controller.run.provide(r))
-    controller.run.provideLayer(DependencyGraph.live)
+    // controller.run.provideLayer(DependencyGraph.env)
+    // controller.run.provideLayer(FancyConsole.live >>> DependencyGraph.partial)
+    // controller.run.provideSomeLayer(DependencyGraph.partial).provideLayer(FancyConsole.live)
+    controller.run.provideCustomLayer(DependencyGraph.partial)
