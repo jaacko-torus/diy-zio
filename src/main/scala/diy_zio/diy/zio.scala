@@ -33,19 +33,27 @@ object zio:
     def provideSome[R1](f: R1 => R): ZIO[R1, E, A] =
       ZIO.accessM(r1 => provide(f(r1)))
 
-    def provideSomeLayer[R1 <: Has[?], E1 >: E, B <: Has[?]](layer: ZLayer[R1, E1, B])(using
-        B => R,
-    ): ZIO[R1, E1, A] =
-      provideLayer(ZLayer.identity[R1] ++ layer)
+    def provideSomeLayer[R1 <: Has[?]]: ProvideSomeLayer[R1] =
+      ProvideSomeLayer[R1]
+    final class ProvideSomeLayer[R1 <: Has[?]]:
+      def apply[E1 >: E, B <: Has[?]](layer: ZLayer[R1, E1, B])(using
+          R1 & B => R,
+      ): ZIO[R1, E1, A] =
+        provideLayer(ZLayer.identity[R1] ++ layer)
 
     // CUSTOM
     def provideCustomLayer[E1 >: E, B <: Has[?]](layer: ZLayer[ZEnv, E1, B])(using
-        B => R,
+        ZEnv & B => R,
     ): ZIO[ZEnv, E1, A] =
       provideSomeLayer(layer)
 
-    def provideLayer[R1, E1 >: E, B](layer: ZLayer[R1, E1, B])(using view: B => R): ZIO[R1, E1, A] =
-      layer.zio.map(view).flatMap((r => provide(r)))
+    def provideLayer[R1]: ProvideLayer[R1] =
+      ProvideLayer[R1]
+    final class ProvideLayer[R1]:
+      def apply[E1 >: E, B](layer: ZLayer[R1, E1, B])(using
+          view: B => R,
+      ): ZIO[R1, E1, A] =
+        layer.zio.map(view).flatMap((r => provide(r)))
 
   object ZIO:
     def succeed[A](a: => A): ZIO[Any, Nothing, A] =
